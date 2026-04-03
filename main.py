@@ -48,48 +48,53 @@ def main():
         print("3. 如果使用外接摄像头，请检查USB连接。")
         return
 
-    print("摄像头已启动！对准二维码即可扫描。在视频窗口按 'q' 键退出程序。")
+    print("摄像头已启动！目前运行在“无窗口低性能消耗”模式。")
+    print("请将二维码对准摄像头扫描... （在终端中按 Ctrl+C 退出程序）")
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("无法获取摄像头画面...")
-            time.sleep(1)
-            continue
+    last_decode_time = 0
+    DECODE_INTERVAL = 0.5  # 限制解码频率：每 0.5 秒解码一次，大幅降低 CPU 占用
 
-        # 识别当前帧中的所有二维码
-        decoded_objects = decode(frame)
-        current_time = time.time()
+    try:
+        while True:
+            # 持续抓取画面，用于清空摄像头底层缓冲，保持画面是最新的
+            if not cap.grab():
+                print("等待摄像头画面...")
+                time.sleep(0.5)
+                continue
 
-        for obj in decoded_objects:
-            # 提取二维码内容
-            qr_content = obj.data.decode('utf-8')
-            
-            # 检查这个二维码最近是否出现过
-            last_seen = recent_qrs.get(qr_content, 0)
-            if current_time - last_seen > TIMEOUT_SECONDS:
-                # 记录为最近30秒内出现过
-                recent_qrs[qr_content] = current_time
-                
-                # 记录到文件
-                log_qr(qr_content)
-                
-                # 如果是网页链接，则在默认浏览器打开
-                if is_url(qr_content):
-                    print(f"----> 检测到网页链接，正在打开: {qr_content}")
-                    webbrowser.open(qr_content)
+            current_time = time.time()
+            # 每隔指定时间，才进行高能耗的“获取真实像素+二维码解码”操作
+            if current_time - last_decode_time >= DECODE_INTERVAL:
+                ret, frame = cap.retrieve()
+                if not ret:
+                    continue
 
-        # 实时显示画面，方便用户对准二维码
-        cv2.imshow("QR Code Scanner", frame)
-        
-        # 捕捉按键，如果是 'q' 则退出
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            print("停止扫描，退出程序。")
-            break
+                # 识别当前帧中的所有二维码
+                decoded_objects = decode(frame)
+                last_decode_time = current_time
 
-    # 释放资源
-    cap.release()
-    cv2.destroyAllWindows()
+                for obj in decoded_objects:
+                    # 提取二维码内容
+                    qr_content = obj.data.decode('utf-8')
+                    
+                    # 检查这个二维码最近是否出现过
+                    last_seen = recent_qrs.get(qr_content, 0)
+                    if current_time - last_seen > TIMEOUT_SECONDS:
+                        # 记录为最近30秒内出现过
+                        recent_qrs[qr_content] = current_time
+                        
+                        # 记录到文件
+                        log_qr(qr_content)
+                        
+                        # 如果是网页链接，则在默认浏览器打开
+                        if is_url(qr_content):
+                            print(f"----> 检测到网页链接，正在打开: {qr_content}")
+                            webbrowser.open(qr_content)
+    except KeyboardInterrupt:
+        print("\n收到退出指令，停止扫描，退出程序。")
+    finally:
+        # 释放资源
+        cap.release()
 
 if __name__ == "__main__":
     main()
